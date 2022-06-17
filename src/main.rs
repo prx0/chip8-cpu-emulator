@@ -1,6 +1,17 @@
 struct CPU {
-    current_operation: u16, // All CHIP-8 opcodes are u16 values
-    registers: [u8; 2], // These two registers are sufficient for addition
+    registers: [u8; 16],
+    position_in_memory: usize, // Rust allows usize for indexing, so we'll use it over u16
+    memory: [u8; 0x1000],
+}
+
+impl Default for CPU {
+    fn default() -> Self {
+        CPU {
+            registers: [0; 16],
+            position_in_memory: 0,
+            memory: [0; 0x1000],
+        }
+    }
 }
 
 impl CPU {
@@ -13,56 +24,64 @@ impl CPU {
     }
 
     fn read_opcode(&self) -> u16 {
-        self.current_operation
+        let p = self.position_in_memory;
+        let op_byte1 = self.memory[p] as u16;
+        let op_byte2 = self.memory[p + 1] as u16;
+        op_byte1 << 8 | op_byte2
     }
 
     fn run(&mut self) {
-        // loop {
+        loop {
             let opcode = self.read_opcode();
+            self.position_in_memory += 2;
             let (c, x, y, d) = CPU::decoding_opcode(opcode);
             match (c, x, y, d) {
+                (0, 0, 0, 0) => { return; }
                 // CPU RIA/1 match 0x8__4 to perform an addition
                 (0x8, _, _, 0x4) => self.add_xy(x, y),
                 _ => todo!("opcode {:04x}", opcode),
             }
-        //}
+        }
     }
 
     fn add_xy(&mut self, x: u8, y: u8) {
-        self.registers[x as usize] += self.registers[y as usize];
+        let arg1 = self.registers[x as usize];
+        let arg2 = self.registers[y as usize];
+
+        let (val, overflow) = arg1.overflowing_add(arg2);
+        self.registers[x as usize] = val;
+
+        // use the last register as carry flag to indicates that
+        // an operation has overflowed the u8 register size
+        if overflow {
+            self.registers[0xF] = 1;
+        } else {
+            self.registers[0xF] = 0;
+        }
     }
 }
 
 fn main() {
-    let mut cpu = CPU {
-        current_operation: 0, // Initializes with a no-op (do nothing)
-        registers: [0; 2],
-    };
+    let mut cpu = CPU::default();
 
-    // 8 signifies that the operation involves two registers
-    // 0 maps to cpu.registers[0]
-    // 1 maps to cpu.registers[1]
-    // 4 indicates addition
-    cpu.current_operation = 0x8014;
     cpu.registers[0] = 5;
     cpu.registers[1] = 10;
-    
+    cpu.registers[2] = 10;
+    cpu.registers[3] = 10;
+
+    // 8 signifies that the operation involves two registers
+    // x maps to cpu.registers[x]
+    // y maps to cpu.registers[y]
+    // 4 indicates the addition
+
+    let mem = &mut cpu.memory;
+    mem[0] = 0x80; mem[1] = 0x14; // Load opcode 0x8014, ask to adds register 1 to register 0
+    mem[2] = 0x80; mem[3] = 0x24; // Load opcode 0x8024, ask to adds register 2 to register 0
+    mem[4] = 0x80; mem[5] = 0x34; // Load opcode 0x8034, ask to adds register 3 to register 0
+
     cpu.run();
 
-    assert_eq!(cpu.registers[0], 15);
+    assert_eq!(cpu.registers[0], 35);
 
-    println!("5 + 10 = {}", cpu.registers[0]);
-
-    let opcode = 0x71E4;
-    let (c, x, y, d) = CPU::decoding_opcode(opcode);
-    assert_eq!(c, 0x7);
-    assert_eq!(x, 0x1);
-    assert_eq!(y, 0xE);
-    assert_eq!(d, 0x4);
-
-    let nnn = opcode & 0x0FFF;
-    let kk = opcode & 0x00FF;
-
-    assert_eq!(nnn, 0x1E4);
-    assert_eq!(kk, 0xE4);
+    println!("5 + 10 + 10 + 10 = {}", cpu.registers[0]);
 }
